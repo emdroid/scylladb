@@ -4,6 +4,7 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 #
 
+import asyncio
 import logging
 import pytest
 import time
@@ -11,14 +12,15 @@ import time
 from cassandra.cluster import ConsistencyLevel
 from cassandra.query import SimpleStatement
 
-from test.pylib.util import wait_for_cql_and_get_hosts
+from test.pylib.manager_client import ManagerClient
+from test.pylib.util import wait_for, wait_for_cql_and_get_hosts
 from test.topology.conftest import skip_mode
 
 
 logger = logging.getLogger(__name__)
 
 
-async def get_injection_params(manager, node_ip, injection):
+async def get_injection_params(manager: ManagerClient, node_ip, injection):
     res = await manager.api.get_injection(node_ip, injection)
     logger.debug(f"get_injection_params({injection}): {res}")
     assert len(res) == 1
@@ -32,7 +34,7 @@ async def get_injection_params(manager, node_ip, injection):
 
 @pytest.mark.asyncio
 @skip_mode('release', 'error injections are not supported in release mode')
-async def test_enable_compacting_data_for_streaming_and_repair_live_update(manager):
+async def test_enable_compacting_data_for_streaming_and_repair_live_update(manager: ManagerClient):
     """
     Check that enable_compacting_data_for_streaming_and_repair is live_update.
     This config item has a non-trivial path of propagation and live-update was
@@ -74,7 +76,7 @@ async def test_enable_compacting_data_for_streaming_and_repair_live_update(manag
 
 @pytest.mark.asyncio
 @skip_mode('release', 'error injections are not supported in release mode')
-async def test_tombstone_gc_for_streaming_and_repair(manager):
+async def test_tombstone_gc_for_streaming_and_repair(manager: ManagerClient):
     """
     Check that:
     * enable_tombstone_gc_for_streaming_and_repair=1 works as expected
@@ -147,7 +149,7 @@ async def test_tombstone_gc_for_streaming_and_repair(manager):
 
 @pytest.mark.asyncio
 @skip_mode('release', 'error injections are not supported in release mode')
-async def test_repair_succeeds_with_unitialized_bm(manager):
+async def test_repair_succeeds_with_unitialized_bm(manager: ManagerClient):
     await manager.server_add()
     await manager.server_add()
     servers = await manager.running_servers()
@@ -167,3 +169,66 @@ async def test_repair_succeeds_with_unitialized_bm(manager):
     assert len(matches) == 1
     matches = await logs[0].grep("failed, continue to run repair", from_mark=marks[0])
     assert len(matches) == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("restart_server",
+                         [True, pytest.param(False, marks=pytest.mark.xfail(reason="Expected failure because of commitlog issue"))])
+async def test_tombstone_gc_repair(manager: ManagerClient, restart_server):
+    cmdline = [
+        "--enable-cache", "0",
+        "--logger-log-level", "database=trace:commitlog=trace",
+    ]
+
+    servers = [await manager.server_add(cmdline=cmdline) for _ in range(2)]
+    cql = manager.get_cql()
+
+    host1, *_ = await wait_for_cql_and_get_hosts(cql, servers[:1], time.time() + 30)
+
+    cql.execute("CREATE KEYSPACE ks WITH replication = {'class': 'NetworkTopologyStrategy', 'replication_factor': 2}")
+    cql.execute("CREATE TABLE ks.tbl (pk int, ck int, PRIMARY KEY (pk, ck))"
+                " WITH tombstone_gc = {'mode': 'repair', 'propagation_delay_in_seconds': '10'} AND gc_grace_seconds = 10")
+
+    # create some tombstones
+    await cql.run_async("INSERT INTO ks.tbl (pk, ck) VALUES (1, 2)")
+    await cql.run_async("INSERT INTO ks.tbl (pk, ck) VALUES (3, 4)")
+    await cql.run_async("DELETE FROM ks.tbl WHERE pk = 1")
+
+    # check that we have the expected tombstone
+    res = list(cql.execute("SELECT * FROM MUTATION_FRAGMENTS(ks.tbl) WHERE pk = 1", host=host1))
+    logger.info(res)
+    logger.info("Result size: %d", len(res))
+    assert len(res) == 2
+
+    test_val = 5
+
+    async def verify_tombstone_gc():
+        nonlocal test_val
+
+        # adding data is needed for some reason with the repair mode for the tombstone GC to trigger
+        await cql.run_async(f"INSERT INTO ks.tbl (pk, ck) VALUES ({test_val}, {test_val+1})")
+        await cql.run_async(f"DELETE FROM ks.tbl WHERE pk = {test_val}")
+        test_val += 2
+
+        await manager.api.repair(servers[0].ip_addr, "ks", "tbl")
+
+        # enabling the following lines makes the test pass
+        # (note that restarting just the servers[0] is not enough)
+        if restart_server:
+            await manager.rolling_restart(servers)
+            host1, *_ = await wait_for_cql_and_get_hosts(cql, servers[:1], time.time() + 30)
+
+        # await manager.api.client.post("/storage_service/flush", host=servers[0].ip_addr)
+        await manager.api.keyspace_flush(servers[0].ip_addr, "ks")
+        await manager.api.keyspace_compaction(servers[0].ip_addr, "ks")
+        await manager.api.drop_sstable_caches(servers[0].ip_addr)
+
+        # exercise the read path to trigger the tombstone gc
+        cql.execute("SELECT * FROM ks.tbl WHERE pk = 1", host=host1)
+        # check that we the tombstones have been cleaned up
+        res = list(cql.execute("SELECT * FROM MUTATION_FRAGMENTS(ks.tbl) WHERE pk = 1", host=host1))
+        logger.info(res)
+        logger.info("Result size: %d", len(res))
+        return True if len(res) < 2 else None
+
+    await wait_for(verify_tombstone_gc, time.time() + 150, period=15)
