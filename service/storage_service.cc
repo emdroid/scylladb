@@ -4061,7 +4061,7 @@ future<> storage_service::raft_removenode(locator::host_id host_id, locator::hos
         }
         try {
             // Make non voter during request submission for better HA
-            co_await _group0->make_nonvoters(ignored_ids, _group0_as, raft_timeout{});
+            co_await _group0->set_voters_status(ignored_ids, false, _group0_as, raft_timeout{});
             co_await _group0->client().add_entry(std::move(g0_cmd), std::move(guard), _group0_as, raft_timeout{});
         } catch (group0_concurrent_modification&) {
             rtlogger.info("removenode: concurrent operation is detected, retrying.");
@@ -4144,7 +4144,7 @@ future<> storage_service::removenode(locator::host_id host_id, locator::host_id_
                 // but before removing it group 0, group 0's availability won't be reduced.
                 if (is_group0_member && ss._group0->is_member(raft_id, true)) {
                     slogger.info("removenode[{}]: making node {} a non-voter in group 0", uuid, raft_id);
-                    ss._group0->make_nonvoter(raft_id, ss._group0_as).get();
+                    ss._group0->set_voter_status(raft_id, false, ss._group0_as).get();
                     slogger.info("removenode[{}]: made node {} a non-voter in group 0", uuid, raft_id);
                 }
 
@@ -6803,7 +6803,7 @@ future<join_node_request_result> storage_service::join_node_request_handler(join
 
         try {
             // Make replaced node and ignored nodes non voters earlier for better HA
-            co_await _group0->make_nonvoters(ignored_nodes_from_join_params(params), _group0_as, raft_timeout{});
+            co_await _group0->set_voters_status(ignored_nodes_from_join_params(params), false, _group0_as, raft_timeout{});
             co_await _group0->client().add_entry(std::move(g0_cmd), std::move(guard), _group0_as, raft_timeout{});
             break;
         } catch (group0_concurrent_modification&) {

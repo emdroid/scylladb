@@ -786,30 +786,31 @@ future<> raft_group0::become_nonvoter(abort_source& as, std::optional<raft_timeo
     auto my_id = load_my_id();
     group0_log.info("becoming a non-voter (my id = {})...", my_id);
 
-    co_await make_raft_config_nonvoter({my_id}, as, timeout);
+    co_await modify_raft_voter_status({my_id}, false, as, timeout);
     group0_log.info("became a non-voter.", my_id);
 }
 
-future<> raft_group0::make_nonvoter(raft::server_id node, abort_source& as, std::optional<raft_timeout> timeout) {
-    co_return co_await make_nonvoters({node}, as, timeout);
+future<> raft_group0::set_voter_status(raft::server_id node, bool can_vote, abort_source& as, std::optional<raft_timeout> timeout) {
+    co_return co_await set_voters_status({node}, can_vote, as, timeout);
 }
 
-future<> raft_group0::make_nonvoters(const std::unordered_set<raft::server_id>& nodes, abort_source& as,
-        std::optional<raft_timeout> timeout)
-{
+future<> raft_group0::set_voters_status(
+        const std::unordered_set<raft::server_id>& nodes, bool can_vote, abort_source& as, std::optional<raft_timeout> timeout) {
     if (!(co_await raft_upgrade_complete())) {
-        on_internal_error(group0_log, "called make_nonvoters before Raft upgrade finished");
+        on_internal_error(group0_log, "called set_voter_status before Raft upgrade finished");
     }
 
     if (nodes.empty()) {
         co_return;
     }
 
-    group0_log.info("making servers {} non-voters...", nodes);
+    const std::string_view status_str = can_vote ? "voters" : "non-voters";
 
-    co_await make_raft_config_nonvoter(nodes, as, timeout);
+    group0_log.info("making servers {} {}...", nodes, status_str);
 
-    group0_log.info("servers {} are now non-voters.", nodes);
+    co_await modify_raft_voter_status(nodes, false, as, timeout);
+
+    group0_log.info("servers {} are now {}.", nodes, status_str);
 }
 
 future<> raft_group0::leave_group0() {
@@ -895,9 +896,8 @@ future<bool> raft_group0::wait_for_raft() {
     co_return true;
 }
 
-future<> raft_group0::make_raft_config_nonvoter(const std::unordered_set<raft::server_id>& ids, abort_source& as,
-        std::optional<raft_timeout> timeout)
-{
+future<> raft_group0::modify_raft_voter_status(
+        const std::unordered_set<raft::server_id>& ids, bool can_vote, abort_source& as, std::optional<raft_timeout> timeout) {
     static constexpr auto max_retry_period = std::chrono::seconds{1};
     auto retry_period = std::chrono::milliseconds{10};
 
@@ -906,14 +906,15 @@ future<> raft_group0::make_raft_config_nonvoter(const std::unordered_set<raft::s
 
         std::vector<raft::config_member> add;
         add.reserve(ids.size());
-        std::transform(ids.begin(), ids.end(), std::back_inserter(add),
-        [] (raft::server_id id) { return raft::config_member{{id, {}}, false}; });
+        std::transform(ids.begin(), ids.end(), std::back_inserter(add), [can_vote](raft::server_id id) {
+            return raft::config_member{{id, {}}, can_vote};
+        });
 
         try {
             co_await _raft_gr.group0_with_timeouts().modify_config(std::move(add), {}, &as, timeout);
             co_return;
         } catch (const raft::commit_status_unknown& e) {
-            group0_log.info("make_raft_config_nonvoter({}): modify_config returned \"{}\", retrying", ids, e);
+            group0_log.info("modify_raft_voter_config({}): modify_config returned \"{}\", retrying", ids, e);
         }
         retry_period *= 2;
         if (retry_period > max_retry_period) {
