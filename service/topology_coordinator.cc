@@ -852,6 +852,7 @@ class topology_coordinator : public endpoint_lifecycle_subscriber {
                     continue;
                 }
 
+                co_await sleep_abortable(1s, _as);
                 co_await _voter_handler.refresh(_as);
             } catch (raft::request_aborted&) {
                 rtlogger.debug("group0 voters refresh fiber aborted");
@@ -2446,7 +2447,9 @@ class topology_coordinator : public endpoint_lifecycle_subscriber {
                            .set("node_state", node_state::normal);
                     muts.emplace_back(builder.build());
                     muts.emplace_back(rtbuilder.build());
+                    co_await sleep_abortable(1s, _as);
                     co_await _voter_handler.on_node_added(node.id, _as);
+                    co_await sleep_abortable(1s, _as);
                     co_await update_topology_state(take_guard(std::move(node)), std::move(muts), "bootstrap: read fence completed");
                     // Make sure the load balancer knows the capacity for the new node immediately.
                     (void)_tablet_load_stats_refresh.trigger().handle_exception([] (auto ep) {

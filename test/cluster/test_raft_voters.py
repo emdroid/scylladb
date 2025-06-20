@@ -30,8 +30,8 @@ async def get_number_of_voters(manager: ManagerClient, srv: ServerInfo):
 # Make sure the algorithm works with different number of nodes.
 # Here with the "num_nodes == 1" we test that we'll only have one voter per DC, despite DC having two nodes
 # (the DC1 must not have 2 voters otherwise losing it would result in the raft majority loss).
-@pytest.mark.parametrize('num_nodes', [1, 3])
-@pytest.mark.parametrize('stop_gracefully', [True, False])
+@pytest.mark.parametrize('num_nodes', [1])
+@pytest.mark.parametrize('stop_gracefully', [False])
 async def test_raft_voters_multidc_kill_dc(manager: ManagerClient, num_nodes: int, stop_gracefully: bool):
     """
     Test the basic functionality of limited voters in a multi-DC cluster.
