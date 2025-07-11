@@ -5,10 +5,16 @@
 #
 from pathlib import PosixPath
 
-from pytest import Collector
+from pytest import Collector, Parser
 
 from test.pylib.cpp.boost.boost_facade import BoostTestFacade
 from test.pylib.cpp.common_cpp_conftest import collect_items
+
+
+def pytest_addoption(parser: Parser) -> None:
+    print("Adding pytest options for random-seed")
+    parser.addoption('--random-seed', action='store', type=int, default=None,
+                     help='Random number generator seed to be used by boost tests')
 
 
 def pytest_collect_file(file_path: PosixPath, parent: Collector):
