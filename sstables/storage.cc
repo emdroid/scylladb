@@ -883,7 +883,11 @@ static future<lw_shared_ptr<const data_dictionary::storage_options>> init_table_
         auto uuid_sstring = s.id().to_sstring();
         boost::erase_all(uuid_sstring, "-");
         auto dir = format("{}/{}/{}-{}", dd, s.ks_name(), s.cf_name(), uuid_sstring);
-        dirs.emplace_back(std::move(dir));
+        // Duplicate directory entries to increase likelihood of concurrent mkdir() race
+        // See: https://github.com/scylladb/scylladb/issues/28259
+        for (int i = 0; i < 10; ++i) {
+            dirs.emplace_back(dir);
+        }
     }
     co_await coroutine::parallel_for_each(dirs, [] (sstring dir) -> future<> {
         co_await io_check([&dir] { return recursive_touch_directory(dir); });
