@@ -326,6 +326,7 @@ add_scylla_test(combined_tests
     column_mapping_test.cc
     commitlog_cleanup_test.cc
     commitlog_test.cc
+    concurrent_mkdir_test.cc
     cql_auth_query_test.cc
     cql_functions_test.cc
     cql_query_group_test.cc

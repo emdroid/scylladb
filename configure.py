@@ -1655,6 +1655,7 @@ deps['test/boost/combined_tests'] += [
     'test/boost/column_mapping_test.cc',
     'test/boost/commitlog_cleanup_test.cc',
     'test/boost/commitlog_test.cc',
+    'test/boost/concurrent_mkdir_test.cc',
     'test/boost/cql_auth_query_test.cc',
     'test/boost/cql_functions_test.cc',
     'test/boost/cql_query_group_test.cc',
