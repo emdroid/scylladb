@@ -37,7 +37,10 @@ SEASTAR_TEST_CASE(test_concurrent_mkdir_stress) {
                 }
             }
         });
-        
+    }
+
+    for (int i = 0; i < 1000000; ++i) {
+        auto dir = fmt::format("testlog/test_dir_{}", i);
         co_await remove_file(dir);
     }
     
