@@ -21,25 +21,26 @@ BOOST_AUTO_TEST_SUITE(concurrent_mkdir_test)
 
 static logger mkdirlog("concurrent_mkdir");
 
+constexpr int DIR_COUNT = 10000;
+
 // Stress test for concurrent mkdir to reproduce EPERM errors.
 // Related to: https://github.com/scylladb/scylladb/issues/28259
 // Run with: ./test.py --mode=dev test/boost/concurrent_mkdir_test.cc --smp 16
 SEASTAR_TEST_CASE(test_concurrent_mkdir_stress) {
-    for (int i = 0; i < 1000000; ++i) {
+    for (int i = 0; i < DIR_COUNT; ++i) {
         auto dir = fmt::format("testlog/test_dir_{}", i);
         
         co_await smp::invoke_on_all([dir] () -> future<> {
             try {
                 co_await touch_directory(dir);
             } catch (const std::system_error& e) {
-                if (e.code().value() != EEXIST) {
-                    mkdirlog.warn("Error on shard {}: errno={} {}", this_shard_id(), e.code().value(), e.what());
-                }
+                mkdirlog.warn("Error on shard {}: errno={} {}", this_shard_id(), e.code().value(), e.what());
+                _exit(1);
             }
         });
     }
 
-    for (int i = 0; i < 1000000; ++i) {
+    for (int i = 0; i < DIR_COUNT; ++i) {
         auto dir = fmt::format("testlog/test_dir_{}", i);
         co_await remove_file(dir);
     }
