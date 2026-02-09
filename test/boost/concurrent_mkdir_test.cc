@@ -45,6 +45,9 @@ SEASTAR_TEST_CASE(test_concurrent_mkdir_stress) {
 
     for (int i = 0; i < ITERATIONS_COUNT; ++i) {
         auto dir = fmt::format("testlog/test_dir_{}", i);
+        co_await remove_file(dir + "/node/status/upload");
+        co_await remove_file(dir + "/node/status");
+        co_await remove_file(dir + "/node");
         co_await remove_file(dir);
     }
     
