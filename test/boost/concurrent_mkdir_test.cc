@@ -30,11 +30,12 @@ constexpr int ITERATIONS_COUNT = 100000;
 // Run with: ./test.py --mode=dev test/boost/concurrent_mkdir_test.cc --smp 16
 SEASTAR_TEST_CASE(test_concurrent_mkdir_stress) {
     for (int i = 0; i < ITERATIONS_COUNT; ++i) {
-        auto dir = fmt::format("testlog/test_dir_{}", i);
+        auto dir = fmt::format("testlog/test_dir_{}/node/status", i);
 
         co_await smp::invoke_on_all([dir] () -> future<> {
             try {
-                co_await touch_directory(dir);
+                co_await recursive_touch_directory(dir);
+                co_await touch_directory(dir + "/upload");
             } catch (const std::system_error& e) {
                 mkdirlog.warn("Error on shard {}: errno={} {}", this_shard_id(), e.code().value(), e.what());
                 _exit(1);
