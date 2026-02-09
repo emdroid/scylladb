@@ -10,10 +10,14 @@
 
 #include <seastar/coroutine/all.hh>
 #include <seastar/testing/test_case.hh>
+#include "seastar/core/loop.hh"
 #include <seastar/core/smp.hh>
 #include <seastar/core/seastar.hh>
+#include <seastar/core/do_with.hh>
 #include "test/lib/log.hh"
 #include <fmt/core.h>
+
+#include <boost/range/irange.hpp>
 
 #include <string_view>
 
@@ -33,23 +37,25 @@ SEASTAR_TEST_CASE(test_concurrent_mkdir_stress) {
         auto dir = fmt::format("testlog/test_dir_{}/node/status", i);
 
         co_await smp::invoke_on_all([dir] () -> future<> {
-            try {
-                co_await recursive_touch_directory(dir);
-                co_await touch_directory(dir + "/upload");
-            } catch (const std::system_error& e) {
-                mkdirlog.warn("Error on shard {}: errno={} {}", this_shard_id(), e.code().value(), e.what());
-                _exit(1);
-            }
+            co_await parallel_for_each(boost::irange(0, 16), [dir] (int) -> future<> {
+                try {
+                    co_await recursive_touch_directory(dir);
+                    co_await touch_directory(dir + "/upload");
+                } catch (const std::system_error& e) {
+                    mkdirlog.warn("Error on shard {}: errno={} {}", this_shard_id(), e.code().value(), e.what());
+                    _exit(1);
+                }
+            });
         });
     }
 
-    for (int i = 0; i < ITERATIONS_COUNT; ++i) {
+    co_await max_concurrent_for_each(boost::irange(0, ITERATIONS_COUNT), smp::count, [](int i) -> future<> {
         auto dir = fmt::format("testlog/test_dir_{}", i);
         co_await remove_file(dir + "/node/status/upload");
         co_await remove_file(dir + "/node/status");
         co_await remove_file(dir + "/node");
         co_await remove_file(dir);
-    }
+    });
     
     mkdirlog.info("Test completed with {} shards", smp::count);
 }
@@ -75,7 +81,7 @@ SEASTAR_TEST_CASE(test_concurrent_mkdir_delete_thrashing) {
     // Only shard 0 deletes, all other shards create - maximizes concurrent mkdir collisions
     co_await smp::invoke_on_all([target_dir, &eperm_count] () -> future<> {
         auto shard = this_shard_id();
-        for (int i = 0; i < ITERATIONS_COUNT; ++i) {
+        co_await max_concurrent_for_each(boost::irange(0, ITERATIONS_COUNT), 16, [shard, target_dir, &eperm_count](int i) -> future<> {
             if (shard == 0) {
                 // Single deleting shard - ignore all errors
                 co_await remove_file(target_dir).then_wrapped([](auto f) {
@@ -95,7 +101,7 @@ SEASTAR_TEST_CASE(test_concurrent_mkdir_delete_thrashing) {
                     }
                 }
             }
-        }
+        });
     });
 
     // Clean up
