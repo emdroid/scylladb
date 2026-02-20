@@ -19,6 +19,7 @@
 #include <seastar/core/future-util.hh>
 #include <seastar/core/weak_ptr.hh>
 #include <seastar/util/defer.hh>
+#include <variant>
 
 #include "service/direct_failure_detector/failure_detector.hh"
 #include "raft/server.hh"
@@ -2225,7 +2226,13 @@ SEASTAR_TEST_CASE(test_frequent_snapshotting) {
         };
 
         auto eq = [] (const call_result_t<ExReg>& r, const output_t& expected) {
-            return std::holds_alternative<output_t>(r) && std::get<output_t>(r) == expected;
+            return std::visit(make_visitor(
+                [&expected] (const output_t& out) { return out == expected; },
+                [] (const auto& err) {
+                    tlogger.error("Call failed with unexpected error: {}", err);
+                    return false;
+                }
+            ), r);
         };
 
         // Wait at most 1000 ticks for the server to elect itself as a leader.
