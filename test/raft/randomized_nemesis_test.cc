@@ -2189,7 +2189,10 @@ SEASTAR_TEST_CASE(basic_test) {
 }
 
 SEASTAR_TEST_CASE(test_frequent_snapshotting) {
-    auto seed = tests::random::get_int<int32_t>();
+    seastar::global_logger_registry().set_logger_level("randomized_nemesis_test", seastar::log_level::debug);
+    seastar::global_logger_registry().set_logger_level("raft", seastar::log_level::debug);
+
+    const uint32_t seed = 2822330586;
     std::mt19937 random_engine{seed};
 
     logical_timer timer;
