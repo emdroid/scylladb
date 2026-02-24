@@ -266,7 +266,10 @@ struct dropped_entry : public error {
 };
 
 struct commit_status_unknown : public error {
-    commit_status_unknown() : error("Commit status of the entry is unknown") {}
+    explicit commit_status_unknown(std::string msg /* = "Commit status of the entry is unknown" */)
+        : error(fmt::format("Commit status of the entry is unknown: {}", msg)) {
+    }
+    sstring message() const { return what(); }
 };
 
 struct stopped_error : public error {

@@ -94,6 +94,7 @@ struct transient_error {
 };
 
 struct commit_status_unknown {
+    sstring message();
 };
 
 struct entry_id {

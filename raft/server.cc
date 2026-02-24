@@ -561,7 +561,7 @@ future<> server_impl::wait_for_entry(entry_id eid, wait_type type, seastar::abor
                 }
 
                 logger.trace("[{}] wait_for_entry {}.{}: entry got truncated away", id(), eid.term, eid.idx);
-                throw commit_status_unknown();
+                throw commit_status_unknown("entry truncated away");
             }
 
             if (*term != eid.term) {
@@ -579,7 +579,7 @@ future<> server_impl::wait_for_entry(entry_id eid, wait_type type, seastar::abor
                 // and had to be applied on at least one server. Some callers of `add_entry`
                 // need to know only that the current state includes that entry, whether it was done
                 // through `apply` on this server or through receiving a snapshot.
-                throw commit_status_unknown();
+                throw commit_status_unknown("entry committed but may not have been applied");
             }
 
             co_return;
@@ -620,7 +620,7 @@ future<> server_impl::wait_for_entry(entry_id eid, wait_type type, seastar::abor
                 // an entry with a bigger term and hope that the
                 // newly elected leader will have a newer log tail.
                 _stats.waiters_dropped++;
-                throw commit_status_unknown();
+                throw commit_status_unknown("an entry with the same index but a newer term is already being waited for");
             }
         }
         // Let's replace an older-term entry with a newer-term one.
@@ -633,7 +633,7 @@ future<> server_impl::wait_for_entry(entry_id eid, wait_type type, seastar::abor
             prev_wait.done.set_exception(dropped_entry{});
             _stats.waiters_awoken++;
         } else {
-            prev_wait.done.set_exception(commit_status_unknown{});
+            prev_wait.done.set_exception(commit_status_unknown("replaced by a newer-term entry"));
             _stats.waiters_dropped++;
         }
     }
@@ -771,7 +771,7 @@ future<> server_impl::add_entry(command command, wait_type type, seastar::abort_
                 } catch (const transport_error& e) {
                     logger.trace("[{}] send_add_entry on {} resulted in {}; "
                                  "rethrow as commit_status_unknown", _id, leader, e);
-                    throw raft::commit_status_unknown();
+                    throw raft::commit_status_unknown("transport error while forwarding add_entry");
                 }
             }
         }();
@@ -842,7 +842,7 @@ future<add_entry_reply> server_impl::execute_modify_config(server_id from,
             // Although modify_config() is safe to retry, preserve
             // information that the entry may already have been
             // committed in the return value.
-            co_return add_entry_reply{commit_status_unknown()};
+            co_return add_entry_reply{commit_status_unknown("entry committed but may not have been applied")};
         }
         if (const auto* ex = dynamic_cast<const not_a_leader*>(&e)) {
             co_return add_entry_reply{transient_error{std::current_exception(), ex->leader}};
@@ -859,7 +859,7 @@ future<add_entry_reply> server_impl::execute_modify_config(server_id from,
 
 future<> server_impl::modify_config(std::vector<config_member> add, std::vector<server_id> del, seastar::abort_source* as) {
     utils::get_local_injector().inject("raft/throw_commit_status_unknown_in_modify_config", [] {
-        throw raft::commit_status_unknown();
+        throw raft::commit_status_unknown("modify_config injection");
     });
 
     if (!_config.enable_forwarding) {
@@ -887,7 +887,7 @@ future<> server_impl::modify_config(std::vector<config_member> add, std::vector<
                 } catch (const transport_error& e) {
                     logger.trace("[{}] send_modify_config on {} resulted in {}; "
                                  "rethrow as commit_status_unknown", _id, leader, e);
-                    throw raft::commit_status_unknown();
+                    throw raft::commit_status_unknown("transport error while forwarding add_entry");
                 }
             }
         }();
@@ -996,7 +996,7 @@ void server_impl::drop_waiters(std::optional<index_t> idx) {
             }
             auto [entry_idx, status] = std::move(*it);
             waiters.erase(it);
-            status.done.set_exception(commit_status_unknown());
+            status.done.set_exception(commit_status_unknown("entry truncated away"));
             _stats.waiters_dropped++;
         }
     };
