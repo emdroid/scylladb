@@ -62,8 +62,12 @@ static void check_eperm(const std::system_error& err, std::atomic<int>& eperm_co
 // Run with: ./test.py --mode=dev test/boost/concurrent_mkdir_test.cc --smp 16
 // ---------------------------------------------------------------------------
 SEASTAR_TEST_CASE(test_concurrent_mkdir_stress) {
-    for (int i = 0; i < ITERATIONS_COUNT; ++i) {
-        auto dir = fmt::format("testlog/test_dir_{}/node/status", i);
+    // Each iteration creates a unique directory tree; all shards race to create
+    // the same path simultaneously. Iterations are independent so they run in
+    // parallel via max_concurrent_for_each.
+    co_await max_concurrent_for_each(boost::irange(0, ITERATIONS_COUNT), smp::count,
+            [](int idx) -> future<> {
+        auto dir = fmt::format("testlog/test_dir_{}/node/status", idx);
 
         co_await smp::invoke_on_all([dir] () -> future<> {
             co_await parallel_for_each(boost::irange(0, 16), [dir] (int) -> future<> {
@@ -76,7 +80,7 @@ SEASTAR_TEST_CASE(test_concurrent_mkdir_stress) {
                 }
             });
         });
-    }
+    });
 
     co_await max_concurrent_for_each(boost::irange(0, ITERATIONS_COUNT), smp::count, [](int idx) -> future<> {
         auto dir = fmt::format("testlog/test_dir_{}", idx);
