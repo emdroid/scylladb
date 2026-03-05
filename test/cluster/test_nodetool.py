@@ -2,6 +2,7 @@ import pytest
 import asyncio
 import subprocess
 from test.pylib.manager_client import ManagerClient
+from test.pylib.scylla_cluster import ReplaceConfig
 from test.pylib.util import wait_for_first_completed
 
 pytestmark = pytest.mark.prepare_3_nodes_cluster
@@ -242,3 +243,66 @@ async def test_regular_node_joining(manager: ManagerClient):
     [await manager.api.message_injection(s.ip_addr, 'delay_node_bootstrap') for s in servers]
 
     await task
+
+
+@pytest.mark.asyncio
+@pytest.mark.skip_mode(mode='release', reason='error injections are not supported in release mode')
+async def test_replacing_node_status(manager: ManagerClient):
+    """Test that a replacing node shows up as Joining (UJ) in nodetool status.
+
+    Verifies the fix for: replacing node should show up in nodetool status.
+    When a node is started with --replace-address to replace a dead node,
+    the replacing node must appear as joining (UJ) in nodetool status output
+    while it is streaming data, rather than not appearing at all.
+    """
+    servers = await manager.running_servers()
+
+    # Stop a node so we can replace it
+    replaced_server = servers[0]
+    await manager.server_stop(replaced_server.server_id)
+
+    # Add the replacing server without starting it to obtain its server_id upfront
+    replace_cfg = ReplaceConfig(replaced_id=replaced_server.server_id, reuse_ip_addr=False, use_host_id=False)
+    replacing_server = await manager.server_add(replace_cfg, start=False)
+
+    # Enable injection to pause the coordinator after streaming completes but before
+    # the replace operation is finalized, so we can observe the 'replacing' state
+    [await manager.api.enable_injection(s.ip_addr, 'delay_node_replace', one_shot=True) for s in servers[1:]]
+
+    # Start the replacing server as a task so we can check status while it runs
+    replace_task = asyncio.create_task(manager.server_start(replacing_server.server_id))
+
+    exe_path = await manager.server_get_exe(servers[1].server_id)
+    cmd = [exe_path, "nodetool", "status"] + ["--logger-log-level",
+                                              "scylla-nodetool=trace",
+                                              "-h", servers[1].ip_addr]
+
+    logs = [await manager.server_open_log(srv.server_id) for srv in servers[1:]]
+
+    await wait_for_first_completed([log.wait_for("delay_node_replace: waiting for message") for log in logs])
+    result = subprocess.run(cmd, capture_output=True, text=True)
+
+    live_eps = await manager.api.client.get_json("/gossiper/endpoint/live", host=servers[1].ip_addr)
+    down_eps = await manager.api.client.get_json("/gossiper/endpoint/down", host=servers[1].ip_addr)
+    leaving = await manager.api.client.get_json("/storage_service/nodes/leaving", host=servers[1].ip_addr)
+    joining = await manager.api.client.get_json("/storage_service/nodes/joining", host=servers[1].ip_addr)
+
+    # The replacing node is live and in joining state
+    assert len(joining) == 1
+    assert joining[0] == replacing_server.ip_addr
+    assert replacing_server.ip_addr in live_eps
+    assert replaced_server.ip_addr in down_eps
+    assert leaving == []
+
+    host_id_map = {}
+    for srv in servers[1:]:
+        host_id_map[srv.ip_addr] = await manager.get_host_id(srv.server_id)
+    host_id_map[replaced_server.ip_addr] = await manager.get_host_id(replaced_server.server_id)
+    host_id_map[replacing_server.ip_addr] = await manager.get_host_id(replacing_server.server_id)
+
+    config = await manager.server_get_config(servers[1].server_id)
+    await validate_status_operation(result.stdout, live_eps, down_eps, leaving, joining, [], host_id_map,
+                                    config['num_tokens'])
+    [await manager.api.message_injection(s.ip_addr, 'delay_node_replace') for s in servers[1:]]
+
+    await replace_task

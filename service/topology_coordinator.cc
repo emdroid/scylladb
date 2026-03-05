@@ -3046,6 +3046,7 @@ class topology_coordinator : public endpoint_lifecycle_subscriber
                 }
                     break;
                 case node_state::replacing: {
+                    co_await utils::get_local_injector().inject("delay_node_replace", utils::wait_for_message(std::chrono::minutes(5)));
                     auto replaced_node_id = parse_replaced_node(node.req_param);
                     node = retake_node(co_await remove_from_group0(std::move(node.guard), replaced_node_id), node.id);
 

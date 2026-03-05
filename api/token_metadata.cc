@@ -81,6 +81,14 @@ void set_token_metadata(http_context& ctx, routes& r, sharded<locator::shared_to
         for (const auto& [token, host_id]: points) {
             eps.insert(g.local().get_address_map().get(host_id));
         }
+        // Also include replacing nodes: they are joining the ring from the cluster's perspective
+        local_tm.get_topology().for_each_node([&] (const locator::node& n) {
+            if (n.get_state() == locator::node::state::replacing) {
+                if (auto ep = g.local().get_address_map().find(n.host_id())) {
+                    eps.insert(*ep);
+                }
+            }
+        });
         return eps | std::views::transform([] (auto& i) { return fmt::to_string(i); }) | std::ranges::to<std::vector>();
     });
 
