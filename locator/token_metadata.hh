@@ -210,6 +210,8 @@ public:
     const std::unordered_map<token, host_id>& get_token_to_endpoint() const;
     const std::unordered_set<host_id>& get_leaving_endpoints() const;
     const std::unordered_map<token, host_id>& get_bootstrap_tokens() const;
+    /// Returns a mapping of replaced_host_id → replacing_host_id for all ongoing replacements.
+    const std::unordered_map<host_id, host_id>& get_replacing_endpoints() const;
 
     /**
      * Update or add a node for a given host_id.

@@ -301,8 +301,10 @@ async def test_replacing_node_status(manager: ManagerClient):
     host_id_map[replacing_server.ip_addr] = await manager.get_host_id(replacing_server.server_id)
 
     config = await manager.server_get_config(servers[1].server_id)
-    await validate_status_operation(result.stdout, live_eps, down_eps, leaving, joining, [], host_id_map,
-                                    config['num_tokens'])
+    # The replaced node's tokens are now attributed to the replacing node in the token map,
+    # so the replaced node shows 0 tokens while the replacing node shows the full num_tokens.
+    await validate_status_operation(result.stdout, live_eps, down_eps, leaving, joining,
+                                    [replaced_server.ip_addr], host_id_map, config['num_tokens'])
     [await manager.api.message_injection(s.ip_addr, 'delay_node_replace') for s in servers[1:]]
 
     await replace_task

@@ -4129,8 +4129,16 @@ storage_service::describe_ring_for_table(const sstring& keyspace_name, const sst
 std::map<token, inet_address> storage_service::get_token_to_endpoint_map() {
     const auto& tm = get_token_metadata();
     std::map<token, inet_address> result;
+    const auto& replacing_endpoints = tm.get_replacing_endpoints();
     for (const auto [t, id]: tm.get_token_to_endpoint()) {
-        result.insert({t, _address_map.get(id)});
+        // If this token's owner is being replaced, attribute the token to the replacing node
+        // so that nodetool status correctly shows the replacing node's token count.
+        auto it = replacing_endpoints.find(id);
+        if (it != replacing_endpoints.end()) {
+            result.insert({t, _address_map.get(it->second)});
+        } else {
+            result.insert({t, _address_map.get(id)});
+        }
     }
     for (const auto [t, id]: tm.get_bootstrap_tokens()) {
         result.insert({t, _address_map.get(id)});

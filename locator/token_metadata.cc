@@ -116,6 +116,10 @@ public:
         return _bootstrap_tokens;
     }
 
+    const std::unordered_map<host_id, host_id>& get_replacing_endpoints() const {
+        return _replacing_endpoints;
+    }
+
     void update_topology(host_id id, std::optional<endpoint_dc_rack> opt_dr, std::optional<node::state> opt_st, std::optional<shard_id> shard_count = std::nullopt) {
         _topology.add_or_update_endpoint(id, std::move(opt_dr), std::move(opt_st), std::move(shard_count));
     }
@@ -906,6 +910,11 @@ token_metadata::get_leaving_endpoints() const {
 const std::unordered_map<token, host_id>&
 token_metadata::get_bootstrap_tokens() const {
     return _impl->get_bootstrap_tokens();
+}
+
+const std::unordered_map<host_id, host_id>&
+token_metadata::get_replacing_endpoints() const {
+    return _impl->get_replacing_endpoints();
 }
 
 void
